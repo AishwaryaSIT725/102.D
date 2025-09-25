@@ -4,19 +4,21 @@ on:
   push:
     branches: ["testing"]
 
+# Required repo secrets:
+#   - AZURE_CREDENTIALS  (full --sdk-auth JSON)
+#   - ACR_LOGIN_SERVER   (e.g. sit722acr.azurecr.io)
 env:
-  # e.g. "sit722acr.azurecr.io"
-  ACR: ${{ secrets.ACR_LOGIN_SERVER }}
+  ACR_LOGIN_SERVER: ${{ secrets.ACR_LOGIN_SERVER }}
 
 jobs:
+  # --------------------------- TESTS ---------------------------
   test:
     runs-on: ubuntu-latest
 
     services:
       postgres:
         image: postgres:16-alpine
-        ports:
-          - 5432:5432
+        ports: ["5432:5432"]
         env:
           POSTGRES_USER: postgres
           POSTGRES_PASSWORD: postgres
@@ -43,7 +45,6 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      # ---------- Backend tests ----------
       - name: Setup Python
         if: startsWith(matrix.path, 'backend/')
         uses: actions/setup-python@v5
@@ -75,15 +76,14 @@ jobs:
             echo "No tests found, skipping."
           fi
 
-      # ---------- Frontend quick check ----------
       - name: Frontend quick check
         if: matrix.path == 'frontend'
         run: echo "No tests for frontend; continuing."
 
+  # ----------------------- BUILD & PUSH ------------------------
   build_and_push:
     needs: test
     runs-on: ubuntu-latest
-
     strategy:
       fail-fast: false
       matrix:
@@ -100,47 +100,54 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      # Login to Azure with your SP JSON
       - name: Azure Login
         uses: azure/login@v2
         with:
           creds: ${{ secrets.AZURE_CREDENTIALS }}
 
+      # Set subscription, verify registry visibility, and login to ACR
       - name: Prepare & login to ACR
         shell: bash
         env:
-          ACR: ${{ secrets.ACR_LOGIN_SERVER }}          # e.g. sit722acr.azurecr.io
-          AZ_SUBSCRIPTION_ID: ${{ secrets.AZ_SUBSCRIPTION_ID }}
+          AZ_CREDS: ${{ secrets.AZURE_CREDENTIALS }}
+          ACR_LOGIN_SERVER: ${{ secrets.ACR_LOGIN_SERVER }}
         run: |
           set -euo pipefail
 
-          echo "ACR login server: ${ACR}"
-          ACR_NAME="${ACR%%.*}"                         # -> sit722acr
-          echo "Resolved ACR name: ${ACR_NAME}"
-
-          echo "Setting active subscription to: ${AZ_SUBSCRIPTION_ID}"
-          az account set --subscription "$AZ_SUBSCRIPTION_ID"
+          # Set the subscription from the secret to avoid cross-subscription issues
+          SUBSCRIPTION_ID=$(echo "$AZ_CREDS" | jq -r '.subscriptionId')
+          az account set --subscription "$SUBSCRIPTION_ID"
 
           echo "Active subscription:"
           az account show --query "{name:name, id:id}" -o table
 
-          echo "Verify ACR exists in this subscription:"
-          az acr show --name "$ACR_NAME" --query "{name:name, loginServer:loginServer}" -o table
+          # Derive registry name from login server (e.g. sit722acr.azurecr.io -> sit722acr)
+          ACR_NAME="${ACR_LOGIN_SERVER%%.*}"
+          echo "ACR name: $ACR_NAME"
 
-          echo "az acr login…"
+          echo "Registries visible to this SP:"
+          az acr list --query "[].{name:name, rg:resourceGroup, login:loginServer}" -o table || true
+
+          # This requires the SP to have **Reader** on the registry.
+          az acr show -n "$ACR_NAME" -o table
+
+          # Login (requires AcrPush on the registry)
           az acr login --name "$ACR_NAME"
+
+      - name: Verify build context
+        run: ls -la "${{ matrix.path }}"
 
       - name: Build & Push ${{ matrix.image }}
         shell: bash
         env:
-          ACR: ${{ secrets.ACR_LOGIN_SERVER }}
+          ACR_LOGIN_SERVER: ${{ secrets.ACR_LOGIN_SERVER }}
         run: |
           set -euo pipefail
-
-          IMAGE="${ACR}/${{ matrix.image }}"
+          IMAGE="${ACR_LOGIN_SERVER}/${{ matrix.image }}"
           TAG_SHA="testing-${{ github.sha }}"
           TAG_LATEST="testing-latest"
 
-          echo "Docker  build context: ${{ matrix.path }}"
           docker build -t "$IMAGE:$TAG_SHA" -t "$IMAGE:$TAG_LATEST" "${{ matrix.path }}"
           docker push "$IMAGE:$TAG_SHA"
           docker push "$IMAGE:$TAG_LATEST"
