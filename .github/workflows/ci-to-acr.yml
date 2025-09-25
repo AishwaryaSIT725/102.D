@@ -5,7 +5,8 @@ on:
     branches: [ "testing" ]
 
 env:
-  ACR: ${{ secrets.ACR_LOGIN_SERVER }}   # e.g., sit722acr.azurecr.io
+  # Example: sit722acr.azurecr.io (set in repo secrets)
+  ACR: ${{ secrets.ACR_LOGIN_SERVER }}
 
 jobs:
   test:
@@ -34,9 +35,9 @@ jobs:
         run: |
           python -m pip install -U pip
           if [ -f requirements.txt ]; then pip install -r requirements.txt; fi
-          # Needed by fastapi/starlette TestClient
-          pip install httpx
-          # run tests only if a tests folder exists
+          # Test dependencies required by FastAPI/Starlette TestClient
+          pip install pytest httpx
+          # Run tests only if a tests directory exists
           if [ -d tests ]; then python -m pytest -q; else echo "No tests found, skipping"; fi
 
       - name: Frontend quick check
@@ -65,7 +66,7 @@ jobs:
         with:
           creds: ${{ secrets.AZURE_CREDENTIALS }}
 
-      # Login to ACR using AAD (derive registry name from login server inside the shell)
+      # Login to ACR using AAD (derive registry name from login server in shell)
       - name: az acr login
         run: |
           ACR_NAME="$(echo "${{ env.ACR }}" | cut -d'.' -f1)"   # sit722acr.azurecr.io -> sit722acr
