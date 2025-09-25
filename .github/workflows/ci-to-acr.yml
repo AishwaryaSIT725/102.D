@@ -5,7 +5,7 @@ on:
     branches: ["testing"]
 
 env:
-  # e.g. "sit722acr.azurecr.io" from repo secret
+  # e.g. "sit722acr.azurecr.io"
   ACR: ${{ secrets.ACR_LOGIN_SERVER }}
 
 jobs:
@@ -43,6 +43,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      # ---------- Backend tests ----------
       - name: Setup Python
         if: startsWith(matrix.path, 'backend/')
         uses: actions/setup-python@v5
@@ -74,6 +75,7 @@ jobs:
             echo "No tests found, skipping."
           fi
 
+      # ---------- Frontend quick check ----------
       - name: Frontend quick check
         if: matrix.path == 'frontend'
         run: echo "No tests for frontend; continuing."
@@ -81,9 +83,7 @@ jobs:
   build_and_push:
     needs: test
     runs-on: ubuntu-latest
-    env:
-      # make ACR available to all steps explicitly
-      ACR: ${{ secrets.ACR_LOGIN_SERVER }}
+
     strategy:
       fail-fast: false
       matrix:
@@ -107,38 +107,32 @@ jobs:
 
       - name: Prepare & login to ACR
         shell: bash
+        env:
+          ACR: ${{ secrets.ACR_LOGIN_SERVER }}          # e.g. sit722acr.azurecr.io
+          AZ_SUBSCRIPTION_ID: ${{ secrets.AZ_SUBSCRIPTION_ID }}
         run: |
           set -euo pipefail
 
-          if [[ -z "${ACR:-}" ]]; then
-            echo "::error::ACR secret (ACR_LOGIN_SERVER) is empty. Set it to something like 'sit722acr.azurecr.io'."
-            exit 1
-          fi
-
-          # Convert "sit722acr.azurecr.io" -> "sit722acr"
-          ACR_NAME="${ACR%%.*}"
           echo "ACR login server: ${ACR}"
-          echo "Resolved ACR name:  ${ACR_NAME}"
+          ACR_NAME="${ACR%%.*}"                         # -> sit722acr
+          echo "Resolved ACR name: ${ACR_NAME}"
 
-          echo "Checking ACR existence and access..."
-          az acr show -n "${ACR_NAME}" --query "name" -o tsv
+          echo "Setting active subscription to: ${AZ_SUBSCRIPTION_ID}"
+          az account set --subscription "$AZ_SUBSCRIPTION_ID"
 
-          echo "Logging into ACR..."
-          az acr login --name "${ACR_NAME}"
+          echo "Active subscription:"
+          az account show --query "{name:name, id:id}" -o table
 
-      - name: Verify build context
-        shell: bash
-        run: |
-          set -euo pipefail
-          echo "Listing contents of ${{ matrix.path }}:"
-          ls -la "${{ matrix.path }}"
-          if [[ ! -f "${{ matrix.path }}/Dockerfile" ]]; then
-            echo "::error::No Dockerfile at '${{ matrix.path }}/Dockerfile'."
-            exit 1
-          fi
+          echo "Verify ACR exists in this subscription:"
+          az acr show --name "$ACR_NAME" --query "{name:name, loginServer:loginServer}" -o table
+
+          echo "az acr login…"
+          az acr login --name "$ACR_NAME"
 
       - name: Build & Push ${{ matrix.image }}
         shell: bash
+        env:
+          ACR: ${{ secrets.ACR_LOGIN_SERVER }}
         run: |
           set -euo pipefail
 
@@ -146,15 +140,7 @@ jobs:
           TAG_SHA="testing-${{ github.sha }}"
           TAG_LATEST="testing-latest"
 
-          echo "Building image: ${IMAGE}"
-          docker build \
-            -f "${{ matrix.path }}/Dockerfile" \
-            -t "${IMAGE}:${TAG_SHA}" \
-            -t "${IMAGE}:${TAG_LATEST}" \
-            "${{ matrix.path }}"
-
-          echo "Pushing tags to ${IMAGE}"
-          docker push "${IMAGE}:${TAG_SHA}"
-          docker push "${IMAGE}:${TAG_LATEST}"
-
-          echo " Finished ${{ matrix.image }}"
+          echo "Docker build context: ${{ matrix.path }}"
+          docker build -t "$IMAGE:$TAG_SHA" -t "$IMAGE:$TAG_LATEST" "${{ matrix.path }}"
+          docker push "$IMAGE:$TAG_SHA"
+          docker push "$IMAGE:$TAG_LATEST"
