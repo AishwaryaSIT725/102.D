@@ -1,27 +1,21 @@
 # frontend/Dockerfile
-
-# ---------- Build stage ----------
-FROM node:18-alpine AS build
+FROM node:18-alpine
 
 WORKDIR /app
-COPY package*.json ./
-RUN npm ci
+
+# copy only dependency files first for better caching
+COPY package.json package-lock.json ./
+
+# If you have a lock file, keep it; otherwise this still works.
+# These flags skip audit/fund output and relax peer-deps a bit.
+RUN npm install --no-audit --no-fund --legacy-peer-deps
+
+# now copy the rest of the app
 COPY . .
-# If your build command is different, change it here:
+
+# build (adjust if your script name differs)
 RUN npm run build
 
-# ---------- Run stage ----------
-FROM nginx:alpine
-
-# Change this if your bundler outputs "build" instead of "dist"
-# - React CRA -> "build"
-# - Vite -> "dist"
-# Copy both possibilities; only one will exist
-COPY --from=build /app/dist /usr/share/nginx/html
-COPY --from=build /app/build /usr/share/nginx/html
-
-# Optional: custom Nginx config (uncomment and add nginx.conf if you need SPA fallback)
-# COPY nginx.conf /etc/nginx/conf.d/default.conf
-
-EXPOSE 80
-CMD ["nginx", "-g", "daemon off;"]
+# (optional) if you run a preview server in container:
+EXPOSE 5173
+CMD ["npm","run","preview","--","--host","0.0.0.0","--port","5173"]
