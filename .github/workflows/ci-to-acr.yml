@@ -11,16 +11,53 @@ env:
 jobs:
   test:
     runs-on: ubuntu-latest
+
+    # Spin up Postgres inside the job
+    services:
+      postgres:
+        image: postgres:15
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: postgres
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd="pg_isready -U postgres"
+          --health-interval=5s
+          --health-timeout=5s
+          --health-retries=30
+
     strategy:
       fail-fast: false
       matrix:
-        service:
-          - backend/customer_service
-          - backend/order_service
-          - backend/product_service
-          - frontend
+        include:
+          - service: backend/customer_service
+            dbname: customer_db
+          - service: backend/order_service
+            dbname: order_db
+          - service: backend/product_service
+            dbname: product_db
+          - service: frontend
+
     steps:
       - uses: actions/checkout@v4
+
+      # Install psql client + create the DB for this matrix entry
+      - name: Prepare test database
+        if: startsWith(matrix.service, 'backend/')
+        run: |
+          sudo apt-get update -y
+          sudo apt-get install -y postgresql-client
+          # Wait until Postgres accepts connections
+          for i in {1..30}; do
+            if PGPASSWORD=postgres psql -h localhost -U postgres -d postgres -c "select 1" >/dev/null 2>&1; then break; fi
+            echo "Waiting for Postgres..."
+            sleep 2
+          done
+          # Create a DB for this service (idempotent)
+          PGPASSWORD=postgres psql -h localhost -U postgres -d postgres -tc "SELECT 1 FROM pg_database WHERE datname='${{ matrix.dbname }}'" | grep -q 1 || \
+          PGPASSWORD=postgres psql -h localhost -U postgres -d postgres -c "CREATE DATABASE \"${{ matrix.dbname }}\";"
 
       # Python tests for backend services (skip for frontend)
       - name: Setup Python
@@ -32,6 +69,9 @@ jobs:
       - name: Install deps & run tests
         if: startsWith(matrix.service, 'backend/')
         working-directory: ${{ matrix.service }}
+        env:
+          # point SQLAlchemy to the DB we just created
+          DATABASE_URL: postgresql://postgres:postgres@localhost:5432/${{ matrix.dbname }}
         run: |
           python -m pip install -U pip
           if [ -f requirements.txt ]; then pip install -r requirements.txt; fi
