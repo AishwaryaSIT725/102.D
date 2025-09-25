@@ -1,11 +1,8 @@
-# week05/k8s/frontend.yaml
-
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  name: frontend-w05-aks
-  labels:
-    app: frontend
+  name: frontend
+  namespace: sit722
 spec:
   replicas: 1
   selector:
@@ -17,30 +14,15 @@ spec:
         app: frontend
     spec:
       containers:
-      - name: frontend-container
-        image: durgeshsamariya.azurecr.io/week05ex01f:v1
-        imagePullPolicy: Always
+      - name: frontend
+        image: sit722acr.azurecr.io/frontend:testing-latest
         ports:
         - containerPort: 80
-        env:
-        - name: PRODUCT_API_BASE_URL
-          value: http://product-service-w05-aks:8000
-        - name: ORDER_API_BASE_URL
-          value: http://order-service-w05-aks:8001
-        - name: CUSTOMER_API_BASE_URL
-          value: http://customer-service-w05-aks:8002
----
-apiVersion: v1
-kind: Service
-metadata:
-  name: frontend-w05-aks
-  labels:
-    app: frontend
-spec:
-  selector:
-    app: frontend
-  ports:
-    - protocol: TCP
-      port: 80
-      targetPort: 80
-  type: LoadBalancer
+        volumeMounts:
+        - name: nginx-config
+          mountPath: /etc/nginx/conf.d/default.conf
+          subPath: nginx.conf
+      volumes:
+      - name: nginx-config
+        configMap:
+          name: nginx-config

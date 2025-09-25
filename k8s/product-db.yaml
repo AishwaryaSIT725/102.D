@@ -1,9 +1,10 @@
-# week05/k8s/product-db.yaml
+# k8s/product-db.yaml
 
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  name: product-db-deployment-w05-aks
+  name: product-db
+  namespace: sit722
   labels:
     app: product-db
 spec:
@@ -17,38 +18,39 @@ spec:
         app: product-db
     spec:
       containers:
-      - name: postgres
-        image: postgres:15-alpine
-        ports:
-        - containerPort: 5432
-        env:
-        - name: POSTGRES_DB
-          valueFrom:
-            configMapKeyRef:
-              name: ecomm-config-w05-aks
-              key: PRODUCTS_DB_NAME
-        - name: POSTGRES_USER
-          valueFrom:
-            secretKeyRef:
-              name: ecomm-secrets-w05-aks
-              key: POSTGRES_USER
-        - name: POSTGRES_PASSWORD
-          valueFrom:
-            secretKeyRef:
-              name: ecomm-secrets-w05-aks
-              key: POSTGRES_PASSWORD
+        - name: postgres
+          image: postgres:15-alpine
+          ports:
+            - containerPort: 5432
+          env:
+            - name: POSTGRES_DB
+              valueFrom:
+                configMapKeyRef:
+                  name: ecomm-config-sit722
+                  key: PRODUCTS_DB_NAME
+            - name: POSTGRES_USER
+              valueFrom:
+                secretKeyRef:
+                  name: ecomm-secrets-sit722
+                  key: POSTGRES_USER
+            - name: POSTGRES_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: ecomm-secrets-sit722
+                  key: POSTGRES_PASSWORD
 ---
 apiVersion: v1
 kind: Service
 metadata:
-  name: product-db-service-w05-aks
+  name: product-db
+  namespace: sit722
   labels:
     app: product-db
 spec:
   selector:
     app: product-db
+  type: ClusterIP
   ports:
     - protocol: TCP
       port: 5432
       targetPort: 5432
-  type: ClusterIP

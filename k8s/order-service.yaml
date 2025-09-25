@@ -1,9 +1,7 @@
-# week05/k8s/order-service.yaml
-
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  name: order-service-w05-aks
+  name: order-service
   labels:
     app: order-service
 spec:
@@ -17,59 +15,65 @@ spec:
         app: order-service
     spec:
       containers:
-      - name: order-service-container
-        image: durgeshsamariya.azurecr.io/week05ex01or:v1
-        imagePullPolicy: Always
-        ports:
-        - containerPort: 8001
-        env:
-        - name: POSTGRES_HOST
-          value: order-db-service-w05-aks
-        - name: POSTGRES_DB
-          valueFrom:
-            configMapKeyRef:
-              name: ecomm-config-w05-aks
-              key: ORDERS_DB_NAME
-        - name: POSTGRES_USER
-          valueFrom:
-            secretKeyRef:
-              name: ecomm-secrets-w05-aks
-              key: POSTGRES_USER
-        - name: POSTGRES_PASSWORD
-          valueFrom:
-            secretKeyRef:
-              name: ecomm-secrets-w05-aks
-              key: POSTGRES_PASSWORD
-        - name: RABBITMQ_HOST
-          valueFrom:
-            configMapKeyRef:
-              name: ecomm-config-w05-aks
-              key: RABBITMQ_HOST
-        - name: RABBITMQ_USER
-          valueFrom:
-            secretKeyRef:
-              name: ecomm-secrets-w05-aks
-              key: RABBITMQ_USER
-        - name: RABBITMQ_PASS
-          valueFrom:
-            secretKeyRef:
-              name: ecomm-secrets-w05-aks
-              key: RABBITMQ_PASS
-        - name: PRODUCT_SERVICE_URL
-          valueFrom:
-            configMapKeyRef:
-              name: ecomm-config-w05-aks
-              key: PRODUCT_SERVICE_URL
-        - name: CUSTOMER_SERVICE_URL
-          valueFrom:
-            configMapKeyRef:
-              name: ecomm-config-w05-aks
-              key: CUSTOMER_SERVICE_URL
+        - name: order-service
+          # Use your ACR image/tag here
+          image: sit722acr.azurecr.io/order_service:testing-latest
+          imagePullPolicy: Always
+          ports:
+            - containerPort: 8001
+          env:
+            # --- Postgres connection ---
+            - name: POSTGRES_HOST
+              value: order-db
+            - name: POSTGRES_DB
+              valueFrom:
+                configMapKeyRef:
+                  name: ecomm-config-sit722
+                  key: ORDERS_DB_NAME
+            - name: POSTGRES_USER
+              valueFrom:
+                secretKeyRef:
+                  name: ecomm-secrets-sit722
+                  key: POSTGRES_USER
+            - name: POSTGRES_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: ecomm-secrets-sit722
+                  key: POSTGRES_PASSWORD
+
+            # --- RabbitMQ connection ---
+            - name: RABBITMQ_HOST
+              valueFrom:
+                configMapKeyRef:
+                  name: ecomm-config-sit722
+                  key: RABBITMQ_HOST
+            - name: RABBITMQ_USER
+              valueFrom:
+                secretKeyRef:
+                  name: ecomm-secrets-sit722
+                  key: RABBITMQ_USER
+            - name: RABBITMQ_PASS
+              valueFrom:
+                secretKeyRef:
+                  name: ecomm-secrets-sit722
+                  key: RABBITMQ_PASS
+
+            # --- Internal service URLs (from ConfigMap) ---
+            - name: PRODUCT_SERVICE_URL
+              valueFrom:
+                configMapKeyRef:
+                  name: ecomm-config-sit722
+                  key: PRODUCT_SERVICE_URL
+            - name: CUSTOMER_SERVICE_URL
+              valueFrom:
+                configMapKeyRef:
+                  name: ecomm-config-sit722
+                  key: CUSTOMER_SERVICE_URL
 ---
 apiVersion: v1
 kind: Service
 metadata:
-  name: order-service-w05-aks
+  name: order-service
   labels:
     app: order-service
 spec:
@@ -78,5 +82,5 @@ spec:
   ports:
     - protocol: TCP
       port: 8001
-      targetPort: 8000
-  type: LoadBalancer
+      targetPort: 8001
+  type: ClusterIP

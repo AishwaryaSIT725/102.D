@@ -1,0 +1,31 @@
+name: Destroy Staging
+on:
+  workflow_dispatch:
+    inputs:
+      namespace:
+        description: "Namespace to delete"
+        required: true
+        default: "sit722"
+
+env:
+  RG: rg-sit722
+  AKS: aks-sit722
+
+jobs:
+  nuke:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Azure login
+        uses: azure/login@v2
+        with:
+          creds: ${{ secrets.AZURE_CREDENTIALS }}
+
+      - name: Set AKS context
+        uses: azure/aks-set-context@v4
+        with:
+          resource-group: ${{ env.RG }}
+          cluster-name:   ${{ env.AKS }}
+
+      - name: Delete namespace (and all its resources)
+        run: |
+          kubectl delete namespace "${{ github.event.inputs.namespace }}" --ignore-not-found

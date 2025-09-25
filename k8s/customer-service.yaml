@@ -1,9 +1,10 @@
-# week05/k8s/customer-service.yaml
+# k8s/customer-service.yaml
 
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  name: customer-service-w05-aks
+  name: customer-service
+  namespace: sit722
   labels:
     app: customer-service
 spec:
@@ -17,34 +18,36 @@ spec:
         app: customer-service
     spec:
       containers:
-      - name: customer-service-container
-        image: durgeshsamariya.azurecr.io/week05ex01cu:v1
-        imagePullPolicy: Always
-        ports:
-        - containerPort: 8002
-        env:
-        - name: POSTGRES_HOST
-          value: customer-db-service-w05-aks
-        - name: POSTGRES_DB
-          valueFrom:
-            configMapKeyRef:
-              name: ecomm-config-w05-aks
-              key: CUSTOMERS_DB_NAME
-        - name: POSTGRES_USER
-          valueFrom:
-            secretKeyRef:
-              name: ecomm-secrets-w05-aks
-              key: POSTGRES_USER
-        - name: POSTGRES_PASSWORD
-          valueFrom:
-            secretKeyRef:
-              name: ecomm-secrets-w05-aks
-              key: POSTGRES_PASSWORD
+        - name: customer-service-container
+          image: sit722acr.azurecr.io/customer_service:testing-latest
+          imagePullPolicy: Always
+          ports:
+            - containerPort: 8002
+          env:
+            - name: POSTGRES_HOST
+              value: customer-db.sit722.svc.cluster.local
+            - name: POSTGRES_DB
+              valueFrom:
+                configMapKeyRef:
+                  name: ecomm-config-sit722
+                  key: CUSTOMERS_DB_NAME
+            - name: POSTGRES_USER
+              valueFrom:
+                secretKeyRef:
+                  name: ecomm-secrets-sit722
+                  key: POSTGRES_USER
+            - name: POSTGRES_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: ecomm-secrets-sit722
+                  key: POSTGRES_PASSWORD
+
 ---
 apiVersion: v1
 kind: Service
 metadata:
-  name: customer-service-w05-aks
+  name: customer-service
+  namespace: sit722
   labels:
     app: customer-service
 spec:
@@ -53,5 +56,5 @@ spec:
   ports:
     - protocol: TCP
       port: 8002
-      targetPort: 8000
-  type: LoadBalancer
+      targetPort: 8002
+  type: ClusterIP

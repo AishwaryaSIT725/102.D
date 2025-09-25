@@ -1,0 +1,24 @@
+# .github/workflows/deploy-to-aks.yml  (keep your login/context steps)
+      - name: Apply ALL manifests (idempotent)
+        run: |
+          kubectl apply -f k8s/namespace.yaml
+          kubectl -n $NAMESPACE apply -f k8s/secrets.yaml
+          kubectl -n $NAMESPACE apply -f k8s/configmaps.yaml
+          kubectl -n $NAMESPACE apply -f k8s/rabbitmq.yaml
+          kubectl -n $NAMESPACE apply -f k8s/customer-db.yaml
+          kubectl -n $NAMESPACE apply -f k8s/product-db.yaml
+          kubectl -n $NAMESPACE apply -f k8s/order-db.yaml
+          kubectl -n $NAMESPACE apply -f k8s/customer-service.yaml
+          kubectl -n $NAMESPACE apply -f k8s/product-service.yaml
+          kubectl -n $NAMESPACE apply -f k8s/order-service.yaml
+          kubectl -n $NAMESPACE apply -f k8s/nginx-config.yaml
+          kubectl -n $NAMESPACE apply -f k8s/frontend.yaml
+
+      - name: Wait for rollouts
+        run: |
+          for d in frontend customer-service product-service order-service product-db order-db customer-db rabbitmq; do
+            kubectl -n $NAMESPACE rollout status deploy/$d --timeout=180s || true
+          done
+
+      - name: Show services (IPs)
+        run: kubectl get svc -n $NAMESPACE -o wide

@@ -1,9 +1,10 @@
-# week05/k8s/customer-db.yaml
+# k8s/customer-db.yaml
 
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  name: customer-db-deployment-w05-aks
+  name: customer-db-deployment
+  namespace: sit722
   labels:
     app: customer-db
 spec:
@@ -17,31 +18,33 @@ spec:
         app: customer-db
     spec:
       containers:
-      - name: postgres
-        image: postgres:15-alpine
-        ports:
-        - containerPort: 5432
-        env:
-        - name: POSTGRES_DB
-          valueFrom:
-            configMapKeyRef:
-              name: ecomm-config-w05-aks
-              key: CUSTOMERS_DB_NAME
-        - name: POSTGRES_USER
-          valueFrom:
-            secretKeyRef:
-              name: ecomm-secrets-w05-aks
-              key: POSTGRES_USER
-        - name: POSTGRES_PASSWORD
-          valueFrom:
-            secretKeyRef:
-              name: ecomm-secrets-w05-aks
-              key: POSTGRES_PASSWORD
+        - name: postgres
+          image: postgres:15-alpine
+          ports:
+            - containerPort: 5432
+          env:
+            - name: POSTGRES_DB
+              valueFrom:
+                configMapKeyRef:
+                  name: ecomm-config-sit722
+                  key: CUSTOMERS_DB_NAME
+            - name: POSTGRES_USER
+              valueFrom:
+                secretKeyRef:
+                  name: ecomm-secrets-sit722
+                  key: POSTGRES_USER
+            - name: POSTGRES_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: ecomm-secrets-sit722
+                  key: POSTGRES_PASSWORD
+
 ---
 apiVersion: v1
 kind: Service
 metadata:
-  name: customer-db-service-w05-aks
+  name: customer-db
+  namespace: sit722
   labels:
     app: customer-db
 spec:
