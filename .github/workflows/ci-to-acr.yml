@@ -5,7 +5,7 @@ on:
     branches: [ "testing" ]
 
 env:
-  ACR: ${{ secrets.ACR_LOGIN_SERVER }}
+  ACR: ${{ secrets.ACR_LOGIN_SERVER }}   # e.g., sit722acr.azurecr.io
 
 jobs:
   test:
@@ -61,9 +61,11 @@ jobs:
         with:
           creds: ${{ secrets.AZURE_CREDENTIALS }}
 
-      # Use AAD to log Docker into ACR (no admin creds needed)
+      # Login to ACR using AAD (derive registry name from login server inside the shell)
       - name: az acr login
-        run: az acr login --name "${{ env.ACR%%.* }}"  # turns "sit722acr.azurecr.io" into "sit722acr"
+        run: |
+          ACR_NAME="$(echo "${{ env.ACR }}" | cut -d'.' -f1)"   # sit722acr.azurecr.io -> sit722acr
+          az acr login --name "$ACR_NAME"
 
       - name: Build & Push ${{ matrix.image }}
         run: |
