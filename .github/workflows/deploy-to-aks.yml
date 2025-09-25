@@ -78,7 +78,7 @@ jobs:
                 echo "::notice title=$s EXTERNAL-IP::${IP:-$HOST}"
                 break
               fi
-              sleep 15
+              sleep 15 
             done
           done
 
