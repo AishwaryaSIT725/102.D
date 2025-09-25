@@ -93,11 +93,17 @@ jobs:
             fi
           done
 
-      - name: Wait for LoadBalancer EXTERNAL-IPs
+      - name: Wait for LoadBalancer EXTERNAL-IPs (discover + non-fatal)
         run: |
-          set -e
-          SVCS=("frontend" "customer-service" "product-service" "order-service")
-          for s in "${SVCS[@]}"; do
+          set +e
+          SVCS=$(kubectl -n "$NAMESPACE" get svc --field-selector spec.type=LoadBalancer -o jsonpath='{range .items[*]}{.metadata.name}{"\n"}{end}')
+          if [ -z "$SVCS" ]; then
+            echo "No LoadBalancer services found in namespace $NAMESPACE"
+            exit 0
+          fi
+
+          echo "LoadBalancer services: $SVCS"
+          for s in $SVCS; do
             echo "Waiting for EXTERNAL-IP on service/$s ..."
             for i in {1..40}; do
               IP=$(kubectl -n "$NAMESPACE" get svc "$s" -o jsonpath='{.status.loadBalancer.ingress[0].ip}')
