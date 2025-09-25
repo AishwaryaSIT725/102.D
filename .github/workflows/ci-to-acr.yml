@@ -140,7 +140,7 @@ jobs:
           TAG_SHA="testing-${{ github.sha }}"
           TAG_LATEST="testing-latest"
 
-          echo "Docker build context: ${{ matrix.path }}"
+          echo "Docker  build context: ${{ matrix.path }}"
           docker build -t "$IMAGE:$TAG_SHA" -t "$IMAGE:$TAG_LATEST" "${{ matrix.path }}"
           docker push "$IMAGE:$TAG_SHA"
           docker push "$IMAGE:$TAG_LATEST"
