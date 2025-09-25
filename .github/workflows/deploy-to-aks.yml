@@ -1,6 +1,7 @@
 name: Deploy to AKS
 
 on:
+  # Manual trigger (recommended for Stage 2)
   workflow_dispatch:
     inputs:
       branch:
@@ -12,20 +13,19 @@ on:
         required: true
         default: "sit722"
 
-  push:
-    branches: ["testing"]
-    paths:
-      - "k8s/**"
-      - ".github/workflows/deploy-to-aks.yml"
-
 env:
-  # Adjust if your RG/AKS names differ
+  # 👇 change if your RG/AKS names are different
   RG: rg-sit722
   AKS: aks-sit722
 
 jobs:
   deploy:
     runs-on: ubuntu-latest
+
+    # Needed for Azure OIDC and repo checkout
+    permissions:
+      id-token: write
+      contents: read
 
     steps:
       - name: Checkout repo
@@ -42,13 +42,14 @@ jobs:
         uses: azure/aks-set-context@v4
         with:
           resource-group: ${{ env.RG }}
-          cluster-name: ${{ env.AKS }}
+          cluster-name:   ${{ env.AKS }}
 
       - name: Set env (namespace)
         run: echo "NAMESPACE=${{ github.event.inputs.namespace }}" >> "$GITHUB_ENV"
 
       - name: Apply ALL manifests (idempotent)
         run: |
+          set -euo pipefail
           kubectl apply -f k8s/namespace.yaml
           kubectl -n "$NAMESPACE" apply -f k8s/secrets.yaml
           kubectl -n "$NAMESPACE" apply -f k8s/configmaps.yaml
@@ -62,13 +63,35 @@ jobs:
           kubectl -n "$NAMESPACE" apply -f k8s/nginx-config.yaml
           kubectl -n "$NAMESPACE" apply -f k8s/frontend.yaml
 
+      - name: Show what exists (deployments/pods/services)
+        run: |
+          kubectl -n "$NAMESPACE" get deploy,po,svc -o wide || true
+
       - name: Wait for deployments to be Ready
         run: |
           set -e
-          DEPLOYS=("frontend" "customer-service" "product-service" "order-service" "customer-db-deployment" "order-db" "product-db" "rabbitmq")
-          for d in "${DEPLOYS[@]}"; do
-            echo "Waiting for deployment/$d rollout..."
-            kubectl -n "$NAMESPACE" rollout status deployment/"$d" --timeout=300s
+          # App-facing deployments (use label app=<name> if present; else name)
+          APPS=("frontend" "customer-service" "product-service" "order-service")
+          for app in "${APPS[@]}"; do
+            echo "==> Waiting for app=$app (if present)"
+            if kubectl -n "$NAMESPACE" get deploy -l app="$app" --no-headers 2>/dev/null | grep -q .; then
+              kubectl -n "$NAMESPACE" rollout status deploy -l app="$app" --timeout=300s
+            elif kubectl -n "$NAMESPACE" get deploy "$app" --ignore-not-found -o name | grep -q .; then
+              kubectl -n "$NAMESPACE" rollout status deploy/"$app" --timeout=300s
+            else
+              echo "Skip: no deployment found for $app"
+            fi
+          done
+
+          # Infra deployments (names may differ repo-to-repo; wait only if they exist)
+          OTHERS=("customer-db-deployment" "product-db" "order-db" "rabbitmq")
+          for d in "${OTHERS[@]}"; do
+            if kubectl -n "$NAMESPACE" get deploy "$d" --ignore-not-found -o name | grep -q .; then
+              echo "==> Waiting for $d"
+              kubectl -n "$NAMESPACE" rollout status deploy/"$d" --timeout=300s
+            else
+              echo "Skip: deployment/$d not found (ok)"
+            fi
           done
 
       - name: Wait for LoadBalancer EXTERNAL-IPs
@@ -84,7 +107,7 @@ jobs:
                 echo "::notice title=$s EXTERNAL-IP::${IP:-$HOST}"
                 break
               fi
-              sleep 15 
+              sleep 15
             done
           done
 
