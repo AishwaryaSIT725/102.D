@@ -81,7 +81,11 @@ jobs:
   build_and_push:
     needs: test
     runs-on: ubuntu-latest
+    env:
+      # make ACR available to all steps explicitly
+      ACR: ${{ secrets.ACR_LOGIN_SERVER }}
     strategy:
+      fail-fast: false
       matrix:
         include:
           - path: backend/customer_service
@@ -101,20 +105,56 @@ jobs:
         with:
           creds: ${{ secrets.AZURE_CREDENTIALS }}
 
-      - name: az acr login
+      - name: Prepare & login to ACR
         shell: bash
         run: |
-          # Convert "sit722acr.azurecr.io" -> "sit722acr" in **bash**
+          set -euo pipefail
+
+          if [[ -z "${ACR:-}" ]]; then
+            echo "::error::ACR secret (ACR_LOGIN_SERVER) is empty. Set it to something like 'sit722acr.azurecr.io'."
+            exit 1
+          fi
+
+          # Convert "sit722acr.azurecr.io" -> "sit722acr"
           ACR_NAME="${ACR%%.*}"
-          echo "Logging into ACR: ${ACR_NAME}"
-          az acr login --name "$ACR_NAME"
+          echo "ACR login server: ${ACR}"
+          echo "Resolved ACR name:  ${ACR_NAME}"
+
+          echo "Checking ACR existence and access..."
+          az acr show -n "${ACR_NAME}" --query "name" -o tsv
+
+          echo "Logging into ACR..."
+          az acr login --name "${ACR_NAME}"
+
+      - name: Verify build context
+        shell: bash
+        run: |
+          set -euo pipefail
+          echo "Listing contents of ${{ matrix.path }}:"
+          ls -la "${{ matrix.path }}"
+          if [[ ! -f "${{ matrix.path }}/Dockerfile" ]]; then
+            echo "::error::No Dockerfile at '${{ matrix.path }}/Dockerfile'."
+            exit 1
+          fi
 
       - name: Build & Push ${{ matrix.image }}
         shell: bash
         run: |
+          set -euo pipefail
+
           IMAGE="${ACR}/${{ matrix.image }}"
           TAG_SHA="testing-${{ github.sha }}"
           TAG_LATEST="testing-latest"
-          docker build -t "$IMAGE:$TAG_SHA" -t "$IMAGE:$TAG_LATEST" "${{ matrix.path }}"
-          docker push "$IMAGE:$TAG_SHA"
-          docker push "$IMAGE:$TAG_LATEST"
+
+          echo "Building image: ${IMAGE}"
+          docker build \
+            -f "${{ matrix.path }}/Dockerfile" \
+            -t "${IMAGE}:${TAG_SHA}" \
+            -t "${IMAGE}:${TAG_LATEST}" \
+            "${{ matrix.path }}"
+
+          echo "Pushing tags to ${IMAGE}"
+          docker push "${IMAGE}:${TAG_SHA}"
+          docker push "${IMAGE}:${TAG_LATEST}"
+
+          echo "✅ Finished ${{ matrix.image }}"
