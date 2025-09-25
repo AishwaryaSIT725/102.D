@@ -1,24 +1,45 @@
-# .github/workflows/deploy-to-aks.yml  (keep your login/context steps)
       - name: Apply ALL manifests (idempotent)
         run: |
           kubectl apply -f k8s/namespace.yaml
-          kubectl -n $NAMESPACE apply -f k8s/secrets.yaml
-          kubectl -n $NAMESPACE apply -f k8s/configmaps.yaml
-          kubectl -n $NAMESPACE apply -f k8s/rabbitmq.yaml
-          kubectl -n $NAMESPACE apply -f k8s/customer-db.yaml
-          kubectl -n $NAMESPACE apply -f k8s/product-db.yaml
-          kubectl -n $NAMESPACE apply -f k8s/order-db.yaml
-          kubectl -n $NAMESPACE apply -f k8s/customer-service.yaml
-          kubectl -n $NAMESPACE apply -f k8s/product-service.yaml
-          kubectl -n $NAMESPACE apply -f k8s/order-service.yaml
-          kubectl -n $NAMESPACE apply -f k8s/nginx-config.yaml
-          kubectl -n $NAMESPACE apply -f k8s/frontend.yaml
+          kubectl -n "$NAMESPACE" apply -f k8s/secrets.yaml
+          kubectl -n "$NAMESPACE" apply -f k8s/configmaps.yaml
+          kubectl -n "$NAMESPACE" apply -f k8s/rabbitmq.yaml
+          kubectl -n "$NAMESPACE" apply -f k8s/customer-db.yaml
+          kubectl -n "$NAMESPACE" apply -f k8s/product-db.yaml
+          kubectl -n "$NAMESPACE" apply -f k8s/order-db.yaml
+          kubectl -n "$NAMESPACE" apply -f k8s/customer-service.yaml
+          kubectl -n "$NAMESPACE" apply -f k8s/product-service.yaml
+          kubectl -n "$NAMESPACE" apply -f k8s/order-service.yaml
+          kubectl -n "$NAMESPACE" apply -f k8s/nginx-config.yaml
+          kubectl -n "$NAMESPACE" apply -f k8s/frontend.yaml
 
-      - name: Wait for rollouts
+      - name: Wait for deployments to be Ready
         run: |
-          for d in frontend customer-service product-service order-service product-db order-db customer-db rabbitmq; do
-            kubectl -n $NAMESPACE rollout status deploy/$d --timeout=180s || true
+          set -e
+          # These names match what you showed in kubectl get pods (deployments)
+          DEPLOYS=("frontend" "customer-service" "product-service" "order-service" "customer-db-deployment" "order-db" "product-db" "rabbitmq")
+          for d in "${DEPLOYS[@]}"; do
+            echo "Waiting for deployment/$d rollout..."
+            kubectl -n "$NAMESPACE" rollout status deployment/"$d" --timeout=300s
+          done
+
+      - name: Wait for LoadBalancer EXTERNAL-IPs
+        run: |
+          set -e
+          SVCS=("frontend" "customer-service" "product-service" "order-service")
+          for s in "${SVCS[@]}"; do
+            echo "Waiting for EXTERNAL-IP on service/$s ..."
+            # ~10 minutes max per service (40 * 15s)
+            for i in {1..40}; do
+              IP=$(kubectl -n "$NAMESPACE" get svc "$s" -o jsonpath='{.status.loadBalancer.ingress[0].ip}')
+              HOST=$(kubectl -n "$NAMESPACE" get svc "$s" -o jsonpath='{.status.loadBalancer.ingress[0].hostname}')
+              if [ -n "$IP" ] || [ -n "$HOST" ]; then
+                echo "::notice title=$s EXTERNAL-IP::${IP:-$HOST}"
+                break
+              fi
+              sleep 15
+            done
           done
 
       - name: Show services (IPs)
-        run: kubectl get svc -n $NAMESPACE -o wide
+        run: kubectl get svc -n "$NAMESPACE" -o wide
