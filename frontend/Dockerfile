@@ -1,29 +1,13 @@
-# Stage 1: build with Node
-FROM node:18 AS build
+# Simple static site image — no Node or build step required
+FROM nginx:1.25-alpine
 
-WORKDIR /app
+# Use your nginx.conf if you have one, otherwise this line can be removed
+# and Nginx's default will serve /usr/share/nginx/html/index.html
+COPY nginx.conf /etc/nginx/conf.d/default.conf
 
-# 1) copy only package files first (better cache)
-COPY package*.json ./
+# Copy only static assets
+COPY index.html /usr/share/nginx/html/index.html
+COPY main.js /usr/share/nginx/html/main.js
 
-# 2) install deps (dev deps included for build)
-RUN npm ci || npm install
-
-# 3) copy the rest of the app
-COPY . .
-
-# (optional but helpful) make local bin executables actually executable
-RUN chmod -R +x node_modules/.bin || true
-
-# 4) build (use npx so we don't rely on the executable bit)
-# If the script exists, this will still call the local vite.
-RUN npm run build || npx vite build
-
-# Stage 2: serve with nginx
-FROM nginx:alpine
-
-# copy built assets
-COPY --from=build /app/dist /usr/share/nginx/html
-
-EXPOSE 80
-CMD ["nginx", "-g", "daemon off;"]
+# If you have more assets (css, images, etc.), copy them too, e.g.:
+# COPY assets/ /usr/share/nginx/html/assets/
