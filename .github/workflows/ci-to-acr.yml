@@ -5,7 +5,7 @@ on:
     branches: ["testing"]
 
 env:
-  # ACR login server from repo secrets, e.g. "sit722acr.azurecr.io"
+  # e.g. "sit722acr.azurecr.io" from repo secret
   ACR: ${{ secrets.ACR_LOGIN_SERVER }}
 
 jobs:
@@ -102,13 +102,15 @@ jobs:
           creds: ${{ secrets.AZURE_CREDENTIALS }}
 
       - name: az acr login
+        shell: bash
         run: |
-          # convert "sit722acr.azurecr.io" -> "sit722acr" using **bash**, not GitHub expressions
+          # Convert "sit722acr.azurecr.io" -> "sit722acr" in **bash**
           ACR_NAME="${ACR%%.*}"
           echo "Logging into ACR: ${ACR_NAME}"
           az acr login --name "$ACR_NAME"
 
       - name: Build & Push ${{ matrix.image }}
+        shell: bash
         run: |
           IMAGE="${ACR}/${{ matrix.image }}"
           TAG_SHA="testing-${{ github.sha }}"
