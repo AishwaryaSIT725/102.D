@@ -157,4 +157,4 @@ jobs:
           docker push "${IMAGE}:${TAG_SHA}"
           docker push "${IMAGE}:${TAG_LATEST}"
 
-          echo " Finished ${{ matrix.image }}"
+          echo "Finished ${{ matrix.image }}"
