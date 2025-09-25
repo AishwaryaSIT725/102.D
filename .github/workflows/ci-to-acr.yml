@@ -4,6 +4,7 @@ on:
   push:
     branches: [ "testing" ]
 
+# ACR login server like: sit722acr.azurecr.io
 env:
   ACR: ${{ secrets.ACR_LOGIN_SERVER }}
 
@@ -12,87 +13,37 @@ jobs:
     runs-on: ubuntu-latest
     strategy:
       matrix:
-        include:
-          - service: backend/customer_service
-            image: customer_service
-            dbname: customer_db
-          - service: backend/order_service
-            image: order_service
-            dbname: order_db
-          - service: backend/product_service
-            image: product_service
-            dbname: product_db
-          - service: frontend
-            image: frontend
-            dbname: ""
-
-    services:
-      pg:
-        image: postgres:16
-        env:
-          POSTGRES_USER: postgres
-          POSTGRES_PASSWORD: postgres
-        ports:
-          - 5432:5432
-        options: >-
-          --health-cmd="pg_isready -U postgres"
-          --health-interval=10s
-          --health-timeout=5s
-          --health-retries=10
-
+        service:
+          - backend/customer_service
+          - backend/order_service
+          - backend/product_service
+          - frontend
     steps:
       - uses: actions/checkout@v4
 
-      - name: Setup Python (only for backend tests)
+      # --- Backend testing (Python) ---
+      - name: Setup Python
         if: startsWith(matrix.service, 'backend/')
         uses: actions/setup-python@v5
         with:
           python-version: "3.11"
 
-      - name: Prepare test database (only for backend tests)
-        if: startsWith(matrix.service, 'backend/')
-        run: |
-          echo "Creating DB: ${DBNAME:=test_db}"
-          for i in {1..20}; do
-            if PGPASSWORD=postgres psql -h localhost -U postgres -tc "SELECT 1" postgres >/dev/null 2>&1; then
-              break
-            fi
-            echo "Waiting for Postgres... ($i/20)"
-            sleep 2
-          done
-          PGPASSWORD=postgres psql -h localhost -U postgres -tc "SELECT 1 FROM pg_database WHERE datname='${{ matrix.dbname }}'" postgres | grep -q 1 || \
-            PGPASSWORD=postgres createdb -h localhost -U postgres "${{ matrix.dbname }}"
-        env:
-          DBNAME: ${{ matrix.dbname }}
-
       - name: Install deps & run tests
         if: startsWith(matrix.service, 'backend/')
         working-directory: ${{ matrix.service }}
         run: |
-          # --- Critical: export DATABASE_URL so the app uses the matrix DB ---
-          export DATABASE_URL="postgresql://postgres:postgres@localhost:5432/${{ matrix.dbname }}"
-          echo "DATABASE_URL=${DATABASE_URL}"
-
-          # Optional, avoids RabbitMQ noise if app tries to connect on startup
-          export RABBITMQ_HOST=localhost
-          export RABBITMQ_PORT=5672
-          export RABBITMQ_USER=guest
-          export RABBITMQ_PASS=guest
-
-          # Optional, for order_service import/tests
-          export CUSTOMER_SERVICE_URL="http://localhost:8002"
-          export PRODUCT_SERVICE_URL="http://localhost:8003"
-
           python -m pip install -U pip
           if [ -f requirements.txt ]; then pip install -r requirements.txt; fi
-          pip install -U pytest httpx
-
-          if [ -f tests/test_main.py ]; then
+          # Ensure test tooling & httpx for FastAPI TestClient
+          pip install pytest httpx
+          # Run tests only if a test file exists
+          if ls tests/*.py >/dev/null 2>&1; then
             pytest -q
           else
-            echo "No tests found, skipping."
+            echo "No tests found; skipping."
           fi
 
+      # --- Frontend quick check (no tests provided) ---
       - name: Frontend quick check
         if: matrix.service == 'frontend'
         run: echo "No tests for frontend; continuing."
@@ -111,7 +62,6 @@ jobs:
             image: product_service
           - path: frontend
             image: frontend
-
     steps:
       - uses: actions/checkout@v4
 
@@ -120,14 +70,24 @@ jobs:
         with:
           creds: ${{ secrets.AZURE_CREDENTIALS }}
 
+      # Log in to ACR (trim the registry name in bash, not in YAML)
       - name: az acr login
-        run: az acr login --name "${{ env.ACR%%.* }}"
+        shell: bash
+        run: |
+          # ACR is something like "sit722acr.azurecr.io" -> we need "sit722acr"
+          ACR_NAME="${ACR%%.*}"
+          echo "Logging into ACR: $ACR_NAME"
+          az acr login --name "$ACR_NAME"
 
       - name: Build & Push ${{ matrix.image }}
+        shell: bash
         run: |
-          IMAGE="${{ env.ACR }}/${{ matrix.image }}"
+          # Use the full login server for tagging (e.g., sit722acr.azurecr.io/image)
+          IMAGE="${ACR}/${{ matrix.image }}"
           TAG_SHA="testing-${{ github.sha }}"
           TAG_LATEST="testing-latest"
+
+          echo "Building ${IMAGE}:${TAG_SHA} from ${{ matrix.path }}"
           docker build -t "$IMAGE:$TAG_SHA" -t "$IMAGE:$TAG_LATEST" "${{ matrix.path }}"
           docker push "$IMAGE:$TAG_SHA"
           docker push "$IMAGE:$TAG_LATEST"
