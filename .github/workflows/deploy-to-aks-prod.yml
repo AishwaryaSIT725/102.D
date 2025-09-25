@@ -1,0 +1,78 @@
+name: Deploy to AKS (Production)
+
+on:
+  push:
+    branches: ["main"]
+
+env:
+  RG: rg-sit722
+  AKS: aks-sit722
+  NAMESPACE: sit722-prod
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+
+    permissions:
+      id-token: write
+      contents: read
+
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v4
+
+      - name: Azure login
+        uses: azure/login@v2
+        with:
+          creds: ${{ secrets.AZURE_CREDENTIALS }}
+
+      - name: Set AKS context
+        uses: azure/aks-set-context@v4
+        with:
+          resource-group: ${{ env.RG }}
+          cluster-name: ${{ env.AKS }}
+
+      - name: Apply ALL manifests (idempotent)
+        run: |
+          set -euo pipefail
+          kubectl apply -f k8s/namespace.yaml
+          kubectl -n "$NAMESPACE" apply -f k8s/secrets.yaml
+          kubectl -n "$NAMESPACE" apply -f k8s/configmaps.yaml
+          kubectl -n "$NAMESPACE" apply -f k8s/rabbitmq.yaml
+          kubectl -n "$NAMESPACE" apply -f k8s/customer-db.yaml
+          kubectl -n "$NAMESPACE" apply -f k8s/product-db.yaml
+          kubectl -n "$NAMESPACE" apply -f k8s/order-db.yaml
+          kubectl -n "$NAMESPACE" apply -f k8s/customer-service.yaml
+          kubectl -n "$NAMESPACE" apply -f k8s/product-service.yaml
+          kubectl -n "$NAMESPACE" apply -f k8s/order-service.yaml
+          kubectl -n "$NAMESPACE" apply -f k8s/nginx-config.yaml
+          kubectl -n "$NAMESPACE" apply -f k8s/frontend.yaml
+
+      - name: Show what exists
+        run: kubectl -n "$NAMESPACE" get deploy,po,svc -o wide || true
+
+      - name: Wait for LoadBalancer EXTERNAL-IPs
+        run: |
+          set +e
+          SVCS=$(kubectl -n "$NAMESPACE" get svc --field-selector spec.type=LoadBalancer -o jsonpath='{range .items[*]}{.metadata.name}{"\n"}{end}')
+          if [ -z "$SVCS" ]; then
+            echo "No LoadBalancer services found in namespace $NAMESPACE"
+            exit 0
+          fi
+
+          echo "LoadBalancer services: $SVCS"
+          for s in $SVCS; do
+            echo "Waiting for EXTERNAL-IP on service/$s ..."
+            for i in {1..40}; do
+              IP=$(kubectl -n "$NAMESPACE" get svc "$s" -o jsonpath='{.status.loadBalancer.ingress[0].ip}')
+              HOST=$(kubectl -n "$NAMESPACE" get svc "$s" -o jsonpath='{.status.loadBalancer.ingress[0].hostname}')
+              if [ -n "$IP" ] || [ -n "$HOST" ]; then
+                echo "::notice title=$s EXTERNAL-IP::${IP:-$HOST}"
+                break
+              fi
+              sleep 15
+            done
+          done
+
+      - name: Show services (IPs)
+        run: kubectl get svc -n "$NAMESPACE" -o wide

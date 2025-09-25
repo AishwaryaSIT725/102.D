@@ -1,0 +1,55 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: order-db
+  labels:
+    app: order-db
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: order-db
+  template:
+    metadata:
+      labels:
+        app: order-db
+    spec:
+      containers:
+        - name: postgres
+          image: postgres:15-alpine
+          ports:
+            - containerPort: 5432
+          env:
+            # Pull the DB name for the orders DB from the configmap
+            - name: POSTGRES_DB
+              valueFrom:
+                configMapKeyRef:
+                  name: ecomm-config-sit722      # <- must exist
+                  key: ORDERS_DB_NAME            # <- must exist
+
+            # Pull username & password from the secret
+            - name: POSTGRES_USER
+              valueFrom:
+                secretKeyRef:
+                  name: ecomm-secrets-sit722     # <- must exist
+                  key: POSTGRES_USER             # <- must exist
+            - name: POSTGRES_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: ecomm-secrets-sit722     # <- must exist
+                  key: POSTGRES_PASSWORD         # <- must exist
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: order-db
+  labels:
+    app: order-db
+spec:
+  selector:
+    app: order-db
+  ports:
+    - protocol: TCP
+      port: 5432
+      targetPort: 5432
+  type: ClusterIP

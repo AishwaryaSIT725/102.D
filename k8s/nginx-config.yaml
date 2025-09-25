@@ -1,0 +1,33 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: nginx-config
+  namespace: sit722
+data:
+  nginx.conf: |
+    server {
+        listen 80;
+        server_name localhost;
+
+        root /usr/share/nginx/html;
+        index index.html index.htm;
+
+        location / {
+            try_files $uri $uri/ /index.html;
+        }
+
+        # Proxy to Customer Service
+        location /api/customers/ {
+            proxy_pass http://customer-service:8002/;
+        }
+
+        # Proxy to Product Service
+        location /api/products/ {
+            proxy_pass http://product-service:8000/;
+        }
+
+        # Proxy to Order Service
+        location /api/orders/ {
+            proxy_pass http://order-service:8001/;
+        }
+    }
