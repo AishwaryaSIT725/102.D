@@ -12,6 +12,12 @@ on:
         required: true
         default: "sit722"
 
+  push:
+    branches: ["testing"]
+    paths:
+      - "k8s/**"
+      - ".github/workflows/deploy-to-aks.yml"
+
 env:
   # Adjust if your RG/AKS names differ
   RG: rg-sit722
