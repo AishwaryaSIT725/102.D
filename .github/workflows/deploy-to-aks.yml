@@ -1,7 +1,6 @@
 name: Deploy to AKS
 
 on:
-  # Manual trigger (recommended for Stage 2)
   workflow_dispatch:
     inputs:
       branch:
@@ -12,6 +11,11 @@ on:
         description: "Kubernetes namespace"
         required: true
         default: "sit722"
+  push:
+    branches: ["testing"]
+    paths:
+      - "k8s/**"
+      - ".github/workflows/deploy-to-aks.yml"
 
 env:
   # 👇 change if your RG/AKS names are different
