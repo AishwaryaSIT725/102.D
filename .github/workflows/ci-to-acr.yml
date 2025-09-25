@@ -2,50 +2,88 @@ name: CI (testing) - Test, Build, Push to ACR
 
 on:
   push:
-    branches: [ "testing" ]
+    branches: ["testing"]
 
-# ACR login server like: sit722acr.azurecr.io
 env:
+  # ACR login server from repo secrets, e.g. "sit722acr.azurecr.io"
   ACR: ${{ secrets.ACR_LOGIN_SERVER }}
 
 jobs:
   test:
     runs-on: ubuntu-latest
+
+    # Start PostgreSQL for tests
+    services:
+      postgres:
+        image: postgres:16-alpine
+        ports:
+          - 5432:5432
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: postgres
+        # wait until Postgres is healthy
+        options: >-
+          --health-cmd="pg_isready -U postgres"
+          --health-interval=10s
+          --health-timeout=5s
+          --health-retries=10
+
     strategy:
+      fail-fast: false
       matrix:
-        service:
-          - backend/customer_service
-          - backend/order_service
-          - backend/product_service
-          - frontend
+        include:
+          - path: backend/customer_service
+            db: customers
+          - path: backend/order_service
+            db: orders
+          - path: backend/product_service
+            db: products
+          - path: frontend               # no DB, we just skip tests below
+            db: ""
+
     steps:
       - uses: actions/checkout@v4
 
-      # --- Backend testing (Python) ---
       - name: Setup Python
-        if: startsWith(matrix.service, 'backend/')
+        if: startsWith(matrix.path, 'backend/')
         uses: actions/setup-python@v5
         with:
           python-version: "3.11"
 
-      - name: Install deps & run tests
-        if: startsWith(matrix.service, 'backend/')
-        working-directory: ${{ matrix.service }}
+      - name: Install Postgres client (psql) & create DBs
+        if: startsWith(matrix.path, 'backend/')
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y postgresql-client
+          # Create the three DBs once; ignore "already exists" errors
+          for DB in customers orders products; do
+            PGPASSWORD=postgres psql -h localhost -U postgres -d postgres -c "CREATE DATABASE ${DB};" || true
+          done
+
+      - name: Install deps & run tests (backend)
+        if: startsWith(matrix.path, 'backend/')
+        working-directory: ${{ matrix.path }}
+        env:
+          # point each service at its own DB
+          DATABASE_URL: postgresql://postgres:postgres@localhost:5432/${{ matrix.db }}
+          # make FastAPI testclient happy where needed
+          PYTHONUNBUFFERED: "1"
         run: |
           python -m pip install -U pip
-          if [ -f requirements.txt ]; then pip install -r requirements.txt; fi
-          # Ensure test tooling & httpx for FastAPI TestClient
-          pip install pytest httpx
-          # Run tests only if a test file exists
-          if ls tests/*.py >/dev/null 2>&1; then
+          # Your requirements already include fastapi/sqlalchemy/etc;
+          # add httpx/pytest for testclient
+          pip install -r requirements.txt
+          pip install httpx pytest
+          # run tests quietly; if a service has no tests, skip gracefully
+          if [ -f tests/test_main.py ]; then
             pytest -q
           else
-            echo "No tests found; skipping."
+            echo "No tests found, skipping."
           fi
 
-      # --- Frontend quick check (no tests provided) ---
       - name: Frontend quick check
-        if: matrix.service == 'frontend'
+        if: matrix.path == 'frontend'
         run: echo "No tests for frontend; continuing."
 
   build_and_push:
@@ -70,24 +108,14 @@ jobs:
         with:
           creds: ${{ secrets.AZURE_CREDENTIALS }}
 
-      # Log in to ACR (trim the registry name in bash, not in YAML)
       - name: az acr login
-        shell: bash
-        run: |
-          # ACR is something like "sit722acr.azurecr.io" -> we need "sit722acr"
-          ACR_NAME="${ACR%%.*}"
-          echo "Logging into ACR: $ACR_NAME"
-          az acr login --name "$ACR_NAME"
+        run: az acr login --name "${{ env.ACR%%.* }}"
 
       - name: Build & Push ${{ matrix.image }}
-        shell: bash
         run: |
-          # Use the full login server for tagging (e.g., sit722acr.azurecr.io/image)
-          IMAGE="${ACR}/${{ matrix.image }}"
+          IMAGE="${{ env.ACR }}/${{ matrix.image }}"
           TAG_SHA="testing-${{ github.sha }}"
           TAG_LATEST="testing-latest"
-
-          echo "Building ${IMAGE}:${TAG_SHA} from ${{ matrix.path }}"
           docker build -t "$IMAGE:$TAG_SHA" -t "$IMAGE:$TAG_LATEST" "${{ matrix.path }}"
           docker push "$IMAGE:$TAG_SHA"
           docker push "$IMAGE:$TAG_LATEST"
