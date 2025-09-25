@@ -71,30 +71,28 @@ jobs:
         run: |
           kubectl -n "$NAMESPACE" get deploy,po,svc -o wide || true
 
-      - name: Wait for deployments to be Ready
+            - name: Wait for deployments (non-fatal, with diagnostics)
         run: |
-          set -e
-          # App-facing deployments (use label app=<name> if present; else name)
-          APPS=("frontend" "customer-service" "product-service" "order-service")
-          for app in "${APPS[@]}"; do
-            echo "==> Waiting for app=$app (if present)"
-            if kubectl -n "$NAMESPACE" get deploy -l app="$app" --no-headers 2>/dev/null | grep -q .; then
-              kubectl -n "$NAMESPACE" rollout status deploy -l app="$app" --timeout=300s
-            elif kubectl -n "$NAMESPACE" get deploy "$app" --ignore-not-found -o name | grep -q .; then
-              kubectl -n "$NAMESPACE" rollout status deploy/"$app" --timeout=300s
-            else
-              echo "Skip: no deployment found for $app"
-            fi
-          done
+          set -u
+          APPS=("frontend" "frontend-deployment" "customer-service" "order-service" "product-service")
 
-          # Infra deployments (names may differ repo-to-repo; wait only if they exist)
-          OTHERS=("customer-db-deployment" "product-db" "order-db" "rabbitmq")
-          for d in "${OTHERS[@]}"; do
-            if kubectl -n "$NAMESPACE" get deploy "$d" --ignore-not-found -o name | grep -q .; then
-              echo "==> Waiting for $d"
-              kubectl -n "$NAMESPACE" rollout status deploy/"$d" --timeout=300s
-            else
-              echo "Skip: deployment/$d not found (ok)"
+          for name in "${APPS[@]}"; do
+            echo "==> Checking deployment: $name"
+            if ! kubectl -n "$NAMESPACE" get deploy "$name" --ignore-not-found -o name | grep -q .; then
+              echo "Skip: deployment/$name not found"
+              continue
+            fi
+
+            echo "Waiting for deployment/$name rollout (10m timeout)..."
+            if ! kubectl -n "$NAMESPACE" rollout status deploy/"$name" --timeout=600s; then
+              echo "!! Rollout did not complete for $name — collecting diagnostics (continuing)"
+              kubectl -n "$NAMESPACE" describe deploy "$name" || true
+              kubectl -n "$NAMESPACE" get pods -l app="$name" -o wide || true
+              POD=$(kubectl -n "$NAMESPACE" get pods -l app="$name" -o jsonpath='{.items[0].metadata.name}' 2>/dev/null || true)
+              if [ -n "$POD" ]; then
+                kubectl -n "$NAMESPACE" describe pod "$POD" || true
+                kubectl -n "$NAMESPACE" logs "$POD" --tail=200 || true
+              fi
             fi
           done
 
