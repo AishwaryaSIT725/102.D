@@ -2,6 +2,7 @@ apiVersion: apps/v1
 kind: Deployment
 metadata:
   name: product-service
+  namespace: sit722
   labels:
     app: product-service
 spec:
@@ -16,13 +17,10 @@ spec:
     spec:
       containers:
         - name: product-service
-          # Use your ACR image/tag here
           image: sit722acr.azurecr.io/product_service:testing-latest
-          imagePullPolicy: Always
           ports:
-            - containerPort: 8000
+            - containerPort: 8002   # ✅ Fixed
           env:
-            # --- Postgres connection ---
             - name: POSTGRES_HOST
               value: product-db
             - name: POSTGRES_DB
@@ -40,30 +38,6 @@ spec:
                 secretKeyRef:
                   name: ecomm-secrets-sit722
                   key: POSTGRES_PASSWORD
-
-            # --- Azure Storage (images) ---
-            - name: AZURE_STORAGE_ACCOUNT_NAME
-              valueFrom:
-                secretKeyRef:
-                  name: ecomm-secrets-sit722
-                  key: AZURE_STORAGE_ACCOUNT_NAME
-            - name: AZURE_STORAGE_ACCOUNT_KEY
-              valueFrom:
-                secretKeyRef:
-                  name: ecomm-secrets-sit722
-                  key: AZURE_STORAGE_ACCOUNT_KEY
-            - name: AZURE_STORAGE_CONTAINER_NAME
-              valueFrom:
-                configMapKeyRef:
-                  name: ecomm-config-sit722
-                  key: AZURE_STORAGE_CONTAINER_NAME
-            - name: AZURE_SAS_TOKEN_EXPIRY_HOURS
-              valueFrom:
-                configMapKeyRef:
-                  name: ecomm-config-sit722
-                  key: AZURE_SAS_TOKEN_EXPIRY_HOURS
-
-            # --- RabbitMQ connection ---
             - name: RABBITMQ_HOST
               valueFrom:
                 configMapKeyRef:
@@ -79,18 +53,17 @@ spec:
                 secretKeyRef:
                   name: ecomm-secrets-sit722
                   key: RABBITMQ_PASS
+
 ---
 apiVersion: v1
 kind: Service
 metadata:
   name: product-service
-  labels:
-    app: product-service
+  namespace: sit722
 spec:
+  type: LoadBalancer
   selector:
     app: product-service
   ports:
-    - protocol: TCP
-      port: 8000
-      targetPort: 8000
-  type: ClusterIP
+    - port: 8000        # what clients use externally
+      targetPort: 8002  # ✅ matches containerPort
