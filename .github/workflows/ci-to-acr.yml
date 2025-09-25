@@ -5,83 +5,47 @@ on:
     branches: ["testing"]
 
 env:
-  # e.g. "sit722acr.azurecr.io" from repo secret
+  # ACR login server (must be set in repo secrets, e.g. sit722acr.azurecr.io)
   ACR: ${{ secrets.ACR_LOGIN_SERVER }}
 
 jobs:
   test:
     runs-on: ubuntu-latest
-
-    services:
-      postgres:
-        image: postgres:16-alpine
-        ports:
-          - 5432:5432
-        env:
-          POSTGRES_USER: postgres
-          POSTGRES_PASSWORD: postgres
-          POSTGRES_DB: postgres
-        options: >-
-          --health-cmd="pg_isready -U postgres"
-          --health-interval=10s
-          --health-timeout=5s
-          --health-retries=10
-
     strategy:
-      fail-fast: false
       matrix:
-        include:
-          - path: backend/customer_service
-            db: customers
-          - path: backend/order_service
-            db: orders
-          - path: backend/product_service
-            db: products
-          - path: frontend
-            db: ""
-
+        service:
+          - backend/customer_service
+          - backend/order_service
+          - backend/product_service
+          - frontend
     steps:
       - uses: actions/checkout@v4
 
+      # Python tests for backend services (skip for frontend)
       - name: Setup Python
-        if: startsWith(matrix.path, 'backend/')
+        if: startsWith(matrix.service, 'backend/')
         uses: actions/setup-python@v5
         with:
           python-version: "3.11"
 
-      - name: Install Postgres client & create DBs
-        if: startsWith(matrix.path, 'backend/')
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y postgresql-client
-          for DB in customers orders products; do
-            PGPASSWORD=postgres psql -h localhost -U postgres -d postgres -c "CREATE DATABASE ${DB};" || true
-          done
-
-      - name: Install deps & run tests (backend)
-        if: startsWith(matrix.path, 'backend/')
-        working-directory: ${{ matrix.path }}
-        env:
-          DATABASE_URL: postgresql://postgres:postgres@localhost:5432/${{ matrix.db }}
-          PYTHONUNBUFFERED: "1"
+      - name: Install deps & run tests
+        if: startsWith(matrix.service, 'backend/')
+        working-directory: ${{ matrix.service }}
         run: |
           python -m pip install -U pip
-          pip install -r requirements.txt
-          pip install httpx pytest
-          if [ -f tests/test_main.py ]; then
-            pytest -q
-          else
-            echo "No tests found, skipping."
-          fi
+          pip install pytest
+          if [ -f requirements.txt ]; then pip install -r requirements.txt; fi
+          if [ -f tests/test_main.py ]; then pytest -q --disable-warnings; else echo "No tests found, skipping"; fi
 
       - name: Frontend quick check
-        if: matrix.path == 'frontend'
+        if: matrix.service == 'frontend'
         run: echo "No tests for frontend; continuing."
 
   build_and_push:
     needs: test
     runs-on: ubuntu-latest
     strategy:
+      fail-fast: false
       matrix:
         include:
           - path: backend/customer_service
@@ -92,7 +56,6 @@ jobs:
             image: product_service
           - path: frontend
             image: frontend
-
     steps:
       - uses: actions/checkout@v4
 
@@ -101,20 +64,63 @@ jobs:
         with:
           creds: ${{ secrets.AZURE_CREDENTIALS }}
 
-      - name: az acr login
+      - name: Verify ACR access & tooling
         shell: bash
+        env:
+          ACR: ${{ secrets.ACR_LOGIN_SERVER }}
         run: |
-          # Convert "sit722acr.azurecr.io" -> "sit722acr" in **bash**
+          set -euo pipefail
+
+          echo "ACR (from secret): ${ACR:-<empty>}"
+          if [[ -z "${ACR:-}" ]]; then
+            echo "::error::ACR_LOGIN_SERVER secret is empty. Set repo secret ACR_LOGIN_SERVER to something like 'sit722acr.azurecr.io'."
+            exit 1
+          fi
+
+          # Convert "sit722acr.azurecr.io" -> "sit722acr"
           ACR_NAME="${ACR%%.*}"
-          echo "Logging into ACR: ${ACR_NAME}"
-          az acr login --name "$ACR_NAME"
+          echo "Resolved ACR_NAME: $ACR_NAME"
+
+          echo "Checking ACR visibility with az acr show..."
+          az acr show -n "$ACR_NAME" --query name -o tsv
+
+          echo "Logging into ACR..."
+          az acr login -n "$ACR_NAME"
+
+          echo "Docker info:"
+          docker info >/dev/null 2>&1 || { echo "::error::Docker is not available"; exit 1; }
+
+          echo "List build context for ${{ matrix.path }}:"
+          ls -la "${{ matrix.path }}"
+
+          if [[ ! -f "${{ matrix.path }}/Dockerfile" ]]; then
+            echo "::error::No Dockerfile found at ${{ matrix.path }}/Dockerfile"
+            exit 1
+          fi
 
       - name: Build & Push ${{ matrix.image }}
         shell: bash
+        env:
+          ACR: ${{ secrets.ACR_LOGIN_SERVER }}
         run: |
+          set -euo pipefail
+          ACR_NAME="${ACR%%.*}"
+
           IMAGE="${ACR}/${{ matrix.image }}"
           TAG_SHA="testing-${{ github.sha }}"
           TAG_LATEST="testing-latest"
-          docker build -t "$IMAGE:$TAG_SHA" -t "$IMAGE:$TAG_LATEST" "${{ matrix.path }}"
+
+          echo "Building image: $IMAGE"
+          docker build \
+            -f "${{ matrix.path }}/Dockerfile" \
+            -t "$IMAGE:$TAG_SHA" \
+            -t "$IMAGE:$TAG_LATEST" \
+            "${{ matrix.path }}"
+
+          echo "Pushing $IMAGE:$TAG_SHA"
           docker push "$IMAGE:$TAG_SHA"
+
+          echo "Pushing $IMAGE:$TAG_LATEST"
           docker push "$IMAGE:$TAG_LATEST"
+
+          echo "Done building and pushing $IMAGE"
