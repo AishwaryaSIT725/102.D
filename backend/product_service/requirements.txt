@@ -5,4 +5,4 @@
  pydantic==2.11.9
  aio-pika==9.5.7
  azure-storage-blob==12.19.1
-+python-multipart==0.0.9
+python-multipart==0.0.9
